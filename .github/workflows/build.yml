@@ -35,7 +35,7 @@ jobs:
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-          case "$GITHUB_SERVER_URL" in *github.com*) git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws;; *) git clone -q "https://oauth2:${TOK}${GITHUB_SERVER_URL#https}:${GITHUB_REPOSITORY}.git" ws;; esac
+          case "$GITHUB_SERVER_URL" in *github.com*) git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws;; *) git clone -q "https://oauth2:${TOK}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git" ws;; esac
           else
             git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws
           fi
@@ -65,7 +65,7 @@ jobs:
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-          case "$GITHUB_SERVER_URL" in *github.com*) git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws;; *) git clone -q "https://oauth2:${TOK}${GITHUB_SERVER_URL#https}:${GITHUB_REPOSITORY}.git" ws;; esac
+          case "$GITHUB_SERVER_URL" in *github.com*) git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws;; *) git clone -q "https://oauth2:${TOK}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git" ws;; esac
           else
             git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws
           fi
@@ -128,5 +128,5 @@ jobs:
           git add .upstream-sha && git commit -qm "ci: upstream -> ${{ needs.check-upstream.outputs.sha }}" || true
           case "$GITHUB_SERVER_URL" in
             *github.com*) git push -q HEAD:main ;;
-            *) git push -q "https://oauth2:${TOK}${GITHUB_SERVER_URL#https}:${GITHUB_REPOSITORY}.git" HEAD:main ;;
+            *) git push -q "https://oauth2:${TOK}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git" HEAD:main ;;
           esac
