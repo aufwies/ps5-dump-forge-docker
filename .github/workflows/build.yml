@@ -90,20 +90,25 @@ jobs:
           curl -sfL "https://api.github.com/repos/${UPSTREAM}/tarball/${{ needs.check-upstream.outputs.sha }}" -o up.tgz
           tar xzf up.tgz -C ws/src --strip-components=1
           rm up.tgz && ls ws/src | head -5
-      - name: docker build
+      - name: docker build (native + cross)
         run: |
           cd ws
           if [ "${{ steps.vars.outputs.mirror }}" = "on" ]; then BP="reg.svc.REDACTED.DOMAIN/docker.io/library/"; else BP="docker.io/library/"; fi
-          docker build --build-arg MIRROR=${{ steps.vars.outputs.mirror }} --build-arg BASE_PREFIX=$BP \
-            -t ${{ steps.vars.outputs.img }}:${{ steps.vars.outputs.tag }} \
-            -t ${{ steps.vars.outputs.img }}:latest-${{ steps.vars.outputs.tag }} .
-      - name: smoke test (WebUI embedded)
+          # 本机原生 + 交叉另一架构 (--target 剪枝, 每次恰好两轮编译)
+          ARCH=$(uname -m); [ "$ARCH" = "aarch64" ] && { NATIVE=arm64; CROSS=x86; } || { NATIVE=x86; CROSS=arm64; }
+          echo "native=$NATIVE cross=$CROSS (mirror=${{ steps.vars.outputs.mirror }})"
+          docker build --build-arg MIRROR=${{ steps.vars.outputs.mirror }} --build-arg BASE_PREFIX=$BP --target rt-native \
+            -t ${{ steps.vars.outputs.img }}:$NATIVE -t ${{ steps.vars.outputs.img }}:latest-$NATIVE .
+          docker build --build-arg MIRROR=${{ steps.vars.outputs.mirror }} --build-arg BASE_PREFIX=$BP --target rt-$CROSS \
+            -t ${{ steps.vars.outputs.img }}:$CROSS -t ${{ steps.vars.outputs.img }}:latest-$CROSS .
+          echo "NATIVE=$NATIVE" >> $GITHUB_ENV; echo "CROSS=$CROSS" >> $GITHUB_ENV
+      - name: smoke test (WebUI embedded, native arch only)
         run: |
-          docker run -d --name t -p 18095:8095 ${{ steps.vars.outputs.img }}:${{ steps.vars.outputs.tag }} --root /tmp
+          docker run -d --name t -p 18095:8095 ${{ steps.vars.outputs.img }}:$NATIVE --root /tmp
           sleep 6
           curl -sf http://127.0.0.1:18095/ | grep -q "<!doctype html" || { docker logs t; docker rm -f t; exit 1; }
           curl -sf http://127.0.0.1:18095/api/jobs | grep -q instance
-          docker rm -f t && echo "SMOKE OK: WebUI embedded"
+          docker rm -f t && echo "SMOKE OK (native $NATIVE); cross $CROSS = 编译成功即收货"
       - name: push
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
@@ -113,8 +118,10 @@ jobs:
           else
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_REPOSITORY_OWNER" --password-stdin
           fi
-          docker push ${{ steps.vars.outputs.img }}:${{ steps.vars.outputs.tag }}
-          docker push ${{ steps.vars.outputs.img }}:latest-${{ steps.vars.outputs.tag }}
+          for TAG in $NATIVE $CROSS; do
+            docker push ${{ steps.vars.outputs.img }}:$TAG
+            docker push ${{ steps.vars.outputs.img }}:latest-$TAG
+          done
       - name: record upstream sha (push back)
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
