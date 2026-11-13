@@ -47,9 +47,6 @@ jobs:
             git clone -q "${SU}/${REPO}.git" ws
           fi
           echo CLONE_OK
-          else
-            git clone -q "${SU}/${REPO}.git" ws
-          fi
       - name: compare upstream sha
         id: cmp
         env:
@@ -85,9 +82,6 @@ jobs:
             git clone -q "${SU}/${REPO}.git" ws
           fi
           echo CLONE_OK
-          else
-            git clone -q "${SU}/${REPO}.git" ws
-          fi
       - name: resolve vars (registry image / arch tag / mirror)
         id: vars
         env:
