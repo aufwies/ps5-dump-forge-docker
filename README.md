@@ -48,4 +48,18 @@ git.app.REDACTED.DOMAIN/rgan/ps5-dump-forge:latest   # 同 digest 别名
 
 ## 升级 ps5-dump-forge 版本
 
-源码默认取 upstream main。要锁版本：把构建用的源码 tarball 换成对应 tag 重新 build（见 AGENT.md 构建节）。
+CI 每日 05:30 自动检查上游 main 的新提交，有更新就重新构建并推送镜像（构建后把上游 sha 记录回 `.upstream-sha`）。也可在 Actions 页手动触发，参数：
+
+- `mirror`：`on`=国内镜像源（默认，Forgejo 内网 runner 用）；`off`=官方源（GitHub runner 用）
+- `force`：`true` 跳过 sha 检查强制构建
+
+镜像 tag 规则：`arm64` / `x86`（按构建机架构自动定）+ `latest-<arch>` 别名。
+
+### Secrets 配置
+
+| 平台 | Secret | 值 | 用途 |
+|---|---|---|---|
+| Forgejo (git.app.REDACTED.DOMAIN) | `REGISTRY_PASSWORD` | git.app 的 API token（已配好） | clone 本仓 + 推镜像 |
+| GitHub | 无需手配 | 内置 `GITHUB_TOKEN` | 推 ghcr.io（首次推完在 package 设 public/private） |
+
+GitHub 侧 runner 是 x86，会自动产出 `x86` tag 并走官方源（`mirror=off`）。

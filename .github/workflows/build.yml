@@ -1,0 +1,130 @@
+name: build
+
+# 双平台兼容 (Forgejo Actions + GitHub Actions), .github/workflows 两边都识别
+# 触发: 每日定时检查上游 quer3q/ps5-dump-forge main 是否有新提交; 手动 dispatch 可强制
+# mirror 开关 (dispatch 输入, 默认 on):
+#   on  = 国内镜像 (Zot 基座 / npmmirror / rsproxy.cn / 南大 apt) — Forgejo 内网 runner
+#   off = 官方源 (docker.io / npmjs / crates.io / deb.debian.org) — GitHub 海外 runner
+
+on:
+  schedule:
+    - cron: "30 21 * * *"   # 每天 05:30 CST
+  workflow_dispatch:
+    inputs:
+      mirror:
+        description: "走国内镜像源 (on/off)"
+        required: false
+        default: "on"
+      force:
+        description: "忽略上游 sha 检查, 强制构建 (true/false)"
+        required: false
+        default: "false"
+
+env:
+  UPSTREAM: quer3q/ps5-dump-forge
+  GIT_LFS_SKIP_SMUDGE: "1"
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.cmp.outputs.changed }}
+      sha: ${{ steps.cmp.outputs.sha }}
+    steps:
+      - name: clone (forgejo w/ token; github native)
+        env:
+          TOK: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          if [ -n "$TOK" ] && [ "$GITHUB_SERVER_URL" = "https://git.app.REDACTED.DOMAIN" ]; then
+            git clone -q "https://oauth2:${TOK}@git.app.REDACTED.DOMAIN/${GITHUB_REPOSITORY}.git" ws
+          else
+            git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws
+          fi
+      - name: compare upstream sha
+        id: cmp
+        env:
+          FORCE: ${{ github.event.inputs.force || 'false' }}
+        run: |
+          SHA=$(git ls-remote https://github.com/${UPSTREAM}.git HEAD | cut -f1)
+          OLD=$(cat ws/.upstream-sha 2>/dev/null || echo none)
+          echo "upstream: $SHA (last built: $OLD, force: $FORCE)"
+          if [ "$SHA" = "$OLD" ] && [ "$FORCE" != "true" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+  build:
+    needs: check-upstream
+    if: needs.check-upstream.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: clone
+        env:
+          TOK: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          if [ -n "$TOK" ] && [ "$GITHUB_SERVER_URL" = "https://git.app.REDACTED.DOMAIN" ]; then
+            git clone -q "https://oauth2:${TOK}@git.app.REDACTED.DOMAIN/${GITHUB_REPOSITORY}.git" ws
+          else
+            git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws
+          fi
+      - name: resolve vars (registry image / arch tag / mirror)
+        id: vars
+        env:
+          M: ${{ github.event.inputs.mirror }}
+        run: |
+          ARCH=$(uname -m); [ "$ARCH" = "aarch64" ] && TAG=arm64 || TAG=x86
+          if [ "$GITHUB_SERVER_URL" = "https://github.com" ]; then
+            IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ps5-dump-forge"
+            [ -z "$M" ] && M=off     # GitHub runner 默认官方源
+          else
+            IMG="git.app.REDACTED.DOMAIN/rgan/ps5-dump-forge"
+            [ -z "$M" ] && M=on      # Forgejo 内网 runner 默认国内镜像
+          fi
+          echo "img=$IMG" >> $GITHUB_OUTPUT; echo "tag=$TAG" >> $GITHUB_OUTPUT; echo "mirror=$M" >> $GITHUB_OUTPUT
+          echo "image: $IMG:$TAG (mirror=$M)"
+      - name: fetch upstream source
+        run: |
+          mkdir -p ws/src
+          curl -sfL "https://api.github.com/repos/${UPSTREAM}/tarball/${{ needs.check-upstream.outputs.sha }}" -o up.tgz
+          tar xzf up.tgz -C ws/src --strip-components=1
+          rm up.tgz && ls ws/src | head -5
+      - name: docker build
+        run: |
+          cd ws
+          if [ "${{ steps.vars.outputs.mirror }}" = "on" ]; then BP="reg.svc.REDACTED.DOMAIN/docker.io/library/"; else BP="docker.io/library/"; fi
+          docker build --build-arg MIRROR=${{ steps.vars.outputs.mirror }} --build-arg BASE_PREFIX=$BP \
+            -t ${{ steps.vars.outputs.img }}:${{ steps.vars.outputs.tag }} \
+            -t ${{ steps.vars.outputs.img }}:latest-${{ steps.vars.outputs.tag }} .
+      - name: smoke test (WebUI embedded)
+        run: |
+          docker run -d --name t -p 18095:8095 ${{ steps.vars.outputs.img }}:${{ steps.vars.outputs.tag }} --root /tmp
+          sleep 6
+          curl -sf http://127.0.0.1:18095/ | grep -q "<!doctype html" || { docker logs t; docker rm -f t; exit 1; }
+          curl -sf http://127.0.0.1:18095/api/jobs | grep -q instance
+          docker rm -f t && echo "SMOKE OK: WebUI embedded"
+      - name: push
+        env:
+          TOK: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          if [ "$GITHUB_SERVER_URL" = "https://git.app.REDACTED.DOMAIN" ]; then
+            echo "$TOK" | docker login git.app.REDACTED.DOMAIN -u rgan --password-stdin
+          else
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_REPOSITORY_OWNER" --password-stdin
+          fi
+          docker push ${{ steps.vars.outputs.img }}:${{ steps.vars.outputs.tag }}
+          docker push ${{ steps.vars.outputs.img }}:latest-${{ steps.vars.outputs.tag }}
+      - name: record upstream sha (push back)
+        env:
+          TOK: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          cd ws
+          echo "${{ needs.check-upstream.outputs.sha }}" > .upstream-sha
+          git config user.name "ci-bot" && git config user.email "ci@REDACTED.DOMAIN"
+          git add .upstream-sha && git commit -qm "ci: upstream -> ${{ needs.check-upstream.outputs.sha }}" || true
+          if [ "$GITHUB_SERVER_URL" = "https://git.app.REDACTED.DOMAIN" ] && [ -n "$TOK" ]; then
+            git push -q "https://oauth2:${TOK}@git.app.REDACTED.DOMAIN/${GITHUB_REPOSITORY}.git" HEAD:main
+          else
+            git push -q HEAD:main
+          fi
