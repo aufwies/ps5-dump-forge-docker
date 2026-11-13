@@ -7,6 +7,9 @@ name: build
 #   off = 官方源 (docker.io / npmjs / crates.io / deb.debian.org) — GitHub 海外 runner
 
 on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/build.yml', 'Dockerfile', 'docker-compose.yaml']
   schedule:
     - cron: "30 21 * * *"   # 每天 05:30 CST
   workflow_dispatch:
