@@ -34,10 +34,12 @@ jobs:
       - name: clone (forgejo w/ token; github native)
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
+          SU: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
         run: |
-          case "$GITHUB_SERVER_URL" in *github.com*) git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws;; *) git clone -q "https://oauth2:${TOK}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git" ws;; esac
+          case "$SU" in *github.com*) git clone -q "${SU}/${REPO}.git" ws;; *) git clone -q "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" ws;; esac
           else
-            git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws
+            git clone -q "${SU}/${REPO}.git" ws
           fi
       - name: compare upstream sha
         id: cmp
@@ -64,19 +66,24 @@ jobs:
       - name: clone
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
+          SU: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
         run: |
-          case "$GITHUB_SERVER_URL" in *github.com*) git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws;; *) git clone -q "https://oauth2:${TOK}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git" ws;; esac
+          case "$SU" in *github.com*) git clone -q "${SU}/${REPO}.git" ws;; *) git clone -q "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" ws;; esac
           else
-            git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws
+            git clone -q "${SU}/${REPO}.git" ws
           fi
       - name: resolve vars (registry image / arch tag / mirror)
         id: vars
         env:
           M: ${{ github.event.inputs.mirror }}
+        env:
+          SU: ${{ github.server_url }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           ARCH=$(uname -m); [ "$ARCH" = "aarch64" ] && TAG=arm64 || TAG=x86
-          case "$GITHUB_SERVER_URL" in
-            *github.com*) IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ps5-dump-forge"; [ -z "$M" ] && M=off ;;
+          case "$SU" in
+            *github.com*) IMG="ghcr.io/${OWNER,,}/ps5-dump-forge"; [ -z "$M" ] && M=off ;;
             *) IMG="${{ secrets.INTERNAL_REGISTRY_IMAGE }}"; [ -z "$M" ] && M=on ;;
           esac
           echo "img=$IMG" >> $GITHUB_OUTPUT; echo "tag=$TAG" >> $GITHUB_OUTPUT; echo "mirror=$M" >> $GITHUB_OUTPUT
@@ -110,7 +117,7 @@ jobs:
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-          case "$GITHUB_SERVER_URL" in
+          case "$SU" in
             *github.com*) echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_REPOSITORY_OWNER" --password-stdin ;;
             *) echo "$TOK" | docker login "${IMG%%/*}" -u "${{ secrets.INTERNAL_REGISTRY_USER }}" --password-stdin ;;
           esac
@@ -121,12 +128,15 @@ jobs:
       - name: record upstream sha (push back)
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
+        env:
+          SU: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
         run: |
           cd ws
           echo "${{ needs.check-upstream.outputs.sha }}" > .upstream-sha
           git config user.name "ci-bot" && git config user.email "ci@users.noreply.github.com"
           git add .upstream-sha && git commit -qm "ci: upstream -> ${{ needs.check-upstream.outputs.sha }}" || true
-          case "$GITHUB_SERVER_URL" in
+          case "$SU" in
             *github.com*) git push -q HEAD:main ;;
-            *) git push -q "https://oauth2:${TOK}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git" HEAD:main ;;
+            *) git push -q "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" HEAD:main ;;
           esac
