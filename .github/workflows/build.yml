@@ -1,10 +1,14 @@
 name: build
 
-# 双平台兼容 (Forgejo Actions + GitHub Actions), .github/workflows 两边都识别
-# 触发: 每日定时检查上游 quer3q/ps5-dump-forge main 是否有新提交; 手动 dispatch 可强制
-# mirror 开关 (dispatch 输入, 默认 on):
-#   on  = 国内镜像 (Zot 基座 / npmmirror / rsproxy.cn / 南大 apt) — Forgejo 内网 runner
-#   off = 官方源 (docker.io / npmjs / crates.io / deb.debian.org) — GitHub 海外 runner
+# 双平台 (Forgejo Actions + GitHub Actions), .github/workflows 两边识别
+# 环境自描述 (借鉴 jellyfin-cix): 全部可变项由各平台仓库 variables 注入, 配了就用:
+#   USE_MIRROR        true=Dockerfile 国内镜像源人格 (npm= npmmirror/crates=rsproxy/apt=南大/rustup=华为云)
+#   HTTPS_PROXY       github 访问代理 (内网 runner 用); 未配=直连
+#   REGISTRY_IMAGE    推送目标全名; 未配 → ghcr.io/<owner>/ps5-dump-forge 兜底
+#   BASE_MIRROR_PREFIX 基座镜像前缀; 未配 → docker.io/library/
+#   REGISTRY_USER     内网 registry 用户名; 未配 → rgan
+# 软互斥约定 (非强制): 内网 = 全配 (mirror=true+proxy+内网registry); GitHub = 全不配
+# 触发: 每日检查上游 quer3q/ps5-dump-forge main; dispatch 可强制
 
 on:
   push:
@@ -14,14 +18,17 @@ on:
     - cron: "30 21 * * *"   # 每天 05:30 CST
   workflow_dispatch:
     inputs:
-      mirror:
-        description: "走国内镜像源 (on/off)"
-        required: false
-        default: "on"
       force:
         description: "忽略上游 sha 检查, 强制构建 (true/false)"
         required: false
         default: "false"
+
+env:
+  USE_MIRROR: ${{ vars.USE_MIRROR }}
+  HTTPS_PROXY: ${{ vars.HTTPS_PROXY }}
+  REGISTRY_IMAGE: ${{ vars.REGISTRY_IMAGE }}
+  BASE_MIRROR_PREFIX: ${{ vars.BASE_MIRROR_PREFIX }}
+  REGISTRY_USER: ${{ vars.REGISTRY_USER }}
 
 jobs:
   check-upstream:
@@ -30,35 +37,33 @@ jobs:
       changed: ${{ steps.cmp.outputs.changed }}
       sha: ${{ steps.cmp.outputs.sha }}
     steps:
-      - name: clone (forgejo w/ token; github native)
+      - name: clone
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
           SU: ${{ github.server_url }}
           REPO: ${{ github.repository }}
         run: |
-          echo "SU=[$SU] REPO=[$REPO]"
+          echo "SU=[$SU] REPO=[$REPO] mirror=[$USE_MIRROR] proxy=[${HTTPS_PROXY:+set}]"
           if [ -n "$TOK" ]; then
-            git clone -q "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" ws
+            git clone -q -c http.proxy= "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" ws
           else
-            git clone -q "${SU}/${REPO}.git" ws
+            git clone -q -c http.proxy= "${SU}/${REPO}.git" ws
           fi
           echo CLONE_OK
       - name: compare upstream sha
         id: cmp
         env:
           FORCE: ${{ github.event.inputs.force || 'false' }}
-          UPSTREAM: quer3q/ps5-dump-forge
-          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
         run: |
-          # api.github.com 通道 (容器内稳定); github.com 主域的 git 协议在 runner 容器内会被掐
+          # api.github.com 通道; 代理由顶层 HTTPS_PROXY env 决定 (配了就走)
           SHA=""
           for i in 1 2 3; do
-            SHA=$(curl -s --max-time 30 "https://api.github.com/repos/${UPSTREAM}/commits/main" | grep -m1 '"sha"' | cut -d'"' -f4 || true)
+            SHA=$(curl -s --max-time 30 "https://api.github.com/repos/quer3q/ps5-dump-forge/commits/main" | grep -m1 '"sha"' | cut -d'"' -f4 || true)
             [ -n "$SHA" ] && break
             echo "sha fetch try$i failed"; sleep 5
           done
           if [ -z "$SHA" ]; then
-            echo "::notice:: api.github unreachable from job network — skip (no build this round)"
+            echo "::notice:: api.github unreachable — skip this round (no build)"
             echo "changed=false" >> $GITHUB_OUTPUT; echo "sha=" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -82,68 +87,58 @@ jobs:
           SU: ${{ github.server_url }}
           REPO: ${{ github.repository }}
         run: |
-          echo "SU=[$SU] REPO=[$REPO]"
           if [ -n "$TOK" ]; then
-            git clone -q "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" ws
+            git clone -q -c http.proxy= "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" ws
           else
-            git clone -q "${SU}/${REPO}.git" ws
+            git clone -q -c http.proxy= "${SU}/${REPO}.git" ws
           fi
-          echo CLONE_OK
-      - name: resolve vars (registry image / arch tag / mirror)
+      - name: resolve vars
         id: vars
-        env:
-          M: ${{ github.event.inputs.mirror }}
-          SU: ${{ github.server_url }}
-          OWNER: ${{ github.repository_owner }}
         run: |
           ARCH=$(uname -m); [ "$ARCH" = "aarch64" ] && TAG=arm64 || TAG=x86
-          case "$SU" in
-            *github.com*) IMG="ghcr.io/${OWNER,,}/ps5-dump-forge"; [ -z "$M" ] && M=off ;;
-            *) IMG="${{ secrets.INTERNAL_REGISTRY_IMAGE }}"; [ -z "$M" ] && M=on ;;
-          esac
-          echo "img=$IMG" >> $GITHUB_OUTPUT; echo "tag=$TAG" >> $GITHUB_OUTPUT; echo "mirror=$M" >> $GITHUB_OUTPUT
-          echo "image: $IMG:$TAG (mirror=$M)"
+          M="${USE_MIRROR:-false}"; [ "$M" = "true" ] && M=on || M=off
+          if [ -n "$REGISTRY_IMAGE" ]; then IMG="$REGISTRY_IMAGE"; else IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ps5-dump-forge"; fi
+          BP="${BASE_MIRROR_PREFIX:-docker.io/library/}"
+          echo "img=$IMG" >> $GITHUB_OUTPUT; echo "tag=$TAG" >> $GITHUB_OUTPUT; echo "mirror=$M" >> $GITHUB_OUTPUT; echo "bp=$BP" >> $GITHUB_OUTPUT
+          echo "image: $IMG:$TAG (mirror=$M, base=$BP)"
       - name: fetch upstream source
-        env:
-          UPSTREAM: quer3q/ps5-dump-forge
-          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
         run: |
           mkdir -p ws/src
-          curl -sfL "https://api.github.com/repos/${UPSTREAM}/tarball/${{ needs.check-upstream.outputs.sha }}" -o up.tgz
+          curl -sfL --max-time 300 "https://api.github.com/repos/quer3q/ps5-dump-forge/tarball/${{ needs.check-upstream.outputs.sha }}" -o up.tgz
           tar xzf up.tgz -C ws/src --strip-components=1
           rm up.tgz && ls ws/src | head -5
       - name: docker build (native + cross)
         run: |
           cd ws
-          if [ "${{ steps.vars.outputs.mirror }}" = "on" ]; then BP="${{ secrets.BASE_MIRROR_PREFIX }}"; else BP="docker.io/library/"; fi
           # 本机原生 + 交叉另一架构 (--target 剪枝, 每次恰好两轮编译)
           ARCH=$(uname -m); [ "$ARCH" = "aarch64" ] && { NATIVE=arm64; CROSS=x86; } || { NATIVE=x86; CROSS=arm64; }
           echo "native=$NATIVE cross=$CROSS (mirror=${{ steps.vars.outputs.mirror }})"
-          docker build --build-arg MIRROR=${{ steps.vars.outputs.mirror }} --build-arg BASE_PREFIX=$BP --target rt-native \
+          docker build --build-arg MIRROR=${{ steps.vars.outputs.mirror }} --build-arg BASE_PREFIX=${{ steps.vars.outputs.bp }} --target rt-native \
             -t ${{ steps.vars.outputs.img }}:$NATIVE -t ${{ steps.vars.outputs.img }}:latest-$NATIVE .
-          docker build --build-arg MIRROR=${{ steps.vars.outputs.mirror }} --build-arg BASE_PREFIX=$BP --target rt-$CROSS \
+          docker build --build-arg MIRROR=${{ steps.vars.outputs.mirror }} --build-arg BASE_PREFIX=${{ steps.vars.outputs.bp }} --target rt-$CROSS \
             -t ${{ steps.vars.outputs.img }}:$CROSS -t ${{ steps.vars.outputs.img }}:latest-$CROSS .
           echo "NATIVE=$NATIVE" >> $GITHUB_ENV; echo "CROSS=$CROSS" >> $GITHUB_ENV
       - name: smoke test (WebUI embedded, native arch only)
         run: |
           docker run -d --name t -p 18095:8095 ${{ steps.vars.outputs.img }}:$NATIVE --root /tmp
           sleep 6
-          curl -sf http://127.0.0.1:18095/ | grep -q "<!doctype html" || { docker logs t; docker rm -f t; exit 1; }
-          curl -sf http://127.0.0.1:18095/api/jobs | grep -q instance
+          curl -sf --noproxy "*" http://127.0.0.1:18095/ | grep -q "<!doctype html" || { docker logs t; docker rm -f t; exit 1; }
+          curl -sf --noproxy "*" http://127.0.0.1:18095/api/jobs | grep -q instance
           docker rm -f t && echo "SMOKE OK (native $NATIVE); cross $CROSS = 编译成功即收货"
       - name: push
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
-          SU: ${{ github.server_url }}
           OWNER: ${{ github.repository_owner }}
         run: |
-          case "$SU" in
-            *github.com*) echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$OWNER" --password-stdin ;;
-            *) echo "$TOK" | docker login "${IMG%%/*}" -u "${{ secrets.INTERNAL_REGISTRY_USER }}" --password-stdin ;;
-          esac
+          IMG=${{ steps.vars.outputs.img }}
+          if [ -n "$TOK" ]; then
+            echo "$TOK" | docker login "${IMG%%/*}" -u "${REGISTRY_USER:-rgan}" --password-stdin
+          else
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$OWNER" --password-stdin
+          fi
           for TAG in $NATIVE $CROSS; do
-            docker push ${{ steps.vars.outputs.img }}:$TAG
-            docker push ${{ steps.vars.outputs.img }}:latest-$TAG
+            docker push "$IMG:$TAG"
+            docker push "$IMG:latest-$TAG"
           done
       - name: record upstream sha (push back)
         env:
@@ -155,7 +150,8 @@ jobs:
           echo "${{ needs.check-upstream.outputs.sha }}" > .upstream-sha
           git config user.name "ci-bot" && git config user.email "ci@users.noreply.github.com"
           git add .upstream-sha && git commit -qm "ci: upstream -> ${{ needs.check-upstream.outputs.sha }}" || true
-          case "$SU" in
-            *github.com*) git push -q HEAD:main ;;
-            *) git push -q "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" HEAD:main ;;
-          esac
+          if [ -n "$TOK" ]; then
+            git push -q -c http.proxy= "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" HEAD:main
+          else
+            git push -q HEAD:main
+          fi
