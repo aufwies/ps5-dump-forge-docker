@@ -48,6 +48,7 @@ jobs:
         env:
           FORCE: ${{ github.event.inputs.force || 'false' }}
           UPSTREAM: quer3q/ps5-dump-forge
+          HTTPS_PROXY: ${{ secrets.CI_PROXY }}
         run: |
           # api.github.com 通道 (容器内稳定); github.com 主域的 git 协议在 runner 容器内会被掐
           SHA=""
@@ -105,6 +106,7 @@ jobs:
       - name: fetch upstream source
         env:
           UPSTREAM: quer3q/ps5-dump-forge
+          HTTPS_PROXY: ${{ secrets.CI_PROXY }}
         run: |
           mkdir -p ws/src
           curl -sfL "https://api.github.com/repos/${UPSTREAM}/tarball/${{ needs.check-upstream.outputs.sha }}" -o up.tgz
