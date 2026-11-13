@@ -56,7 +56,11 @@ jobs:
             [ -n "$SHA" ] && break
             echo "sha fetch try$i failed"; sleep 5
           done
-          [ -n "$SHA" ] || { echo "upstream sha fetch failed"; exit 1; }
+          if [ -z "$SHA" ]; then
+            echo "::notice:: api.github unreachable from job network — skip (no build this round)"
+            echo "changed=false" >> $GITHUB_OUTPUT; echo "sha=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
           OLD=$(cat ws/.upstream-sha 2>/dev/null || echo none)
           echo "upstream: $SHA (last built: $OLD, force: $FORCE)"
           if [ "$SHA" = "$OLD" ] && [ "$FORCE" != "true" ]; then
