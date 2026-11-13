@@ -77,7 +77,7 @@ jobs:
           ARCH=$(uname -m); [ "$ARCH" = "aarch64" ] && TAG=arm64 || TAG=x86
           case "$GITHUB_SERVER_URL" in
             *github.com*) IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ps5-dump-forge"; [ -z "$M" ] && M=off ;;
-            *) IMG="${{ vars.INTERNAL_REGISTRY_IMAGE }}"; [ -z "$M" ] && M=on ;;
+            *) IMG="${{ secrets.INTERNAL_REGISTRY_IMAGE }}"; [ -z "$M" ] && M=on ;;
           esac
           echo "img=$IMG" >> $GITHUB_OUTPUT; echo "tag=$TAG" >> $GITHUB_OUTPUT; echo "mirror=$M" >> $GITHUB_OUTPUT
           echo "image: $IMG:$TAG (mirror=$M)"
@@ -90,7 +90,7 @@ jobs:
       - name: docker build (native + cross)
         run: |
           cd ws
-          if [ "${{ steps.vars.outputs.mirror }}" = "on" ]; then BP="${{ vars.BASE_MIRROR_PREFIX }}"; else BP="docker.io/library/"; fi
+          if [ "${{ steps.vars.outputs.mirror }}" = "on" ]; then BP="${{ secrets.BASE_MIRROR_PREFIX }}"; else BP="docker.io/library/"; fi
           # 本机原生 + 交叉另一架构 (--target 剪枝, 每次恰好两轮编译)
           ARCH=$(uname -m); [ "$ARCH" = "aarch64" ] && { NATIVE=arm64; CROSS=x86; } || { NATIVE=x86; CROSS=arm64; }
           echo "native=$NATIVE cross=$CROSS (mirror=${{ steps.vars.outputs.mirror }})"
@@ -112,7 +112,7 @@ jobs:
         run: |
           case "$GITHUB_SERVER_URL" in
             *github.com*) echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_REPOSITORY_OWNER" --password-stdin ;;
-            *) echo "$TOK" | docker login "${IMG%%/*}" -u "${{ vars.INTERNAL_REGISTRY_USER }}" --password-stdin ;;
+            *) echo "$TOK" | docker login "${IMG%%/*}" -u "${{ secrets.INTERNAL_REGISTRY_USER }}" --password-stdin ;;
           esac
           for TAG in $NATIVE $CROSS; do
             docker push ${{ steps.vars.outputs.img }}:$TAG
