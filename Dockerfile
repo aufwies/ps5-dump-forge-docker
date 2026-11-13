@@ -6,7 +6,7 @@
 # 运行身份不在镜像钉死 — 由部署侧 compose user: 注入
 
 ARG MIRROR=on
-ARG BASE_PREFIX=reg.svc.REDACTED.DOMAIN/docker.io/library/
+ARG BASE_PREFIX=docker.io/library/
 
 # ── Stage 1: 前端 (npm run build:http → dist-http) ──
 FROM ${BASE_PREFIX}node:20-bookworm AS web

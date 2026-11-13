@@ -35,8 +35,7 @@ jobs:
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-          if [ -n "$TOK" ] && [ "$GITHUB_SERVER_URL" = "https://git.app.REDACTED.DOMAIN" ]; then
-            git clone -q "https://oauth2:${TOK}@git.app.REDACTED.DOMAIN/${GITHUB_REPOSITORY}.git" ws
+          case "$GITHUB_SERVER_URL" in *github.com*) git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws;; *) git clone -q "https://oauth2:${TOK}${GITHUB_SERVER_URL#https}:${GITHUB_REPOSITORY}.git" ws;; esac
           else
             git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws
           fi
@@ -66,8 +65,7 @@ jobs:
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-          if [ -n "$TOK" ] && [ "$GITHUB_SERVER_URL" = "https://git.app.REDACTED.DOMAIN" ]; then
-            git clone -q "https://oauth2:${TOK}@git.app.REDACTED.DOMAIN/${GITHUB_REPOSITORY}.git" ws
+          case "$GITHUB_SERVER_URL" in *github.com*) git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws;; *) git clone -q "https://oauth2:${TOK}${GITHUB_SERVER_URL#https}:${GITHUB_REPOSITORY}.git" ws;; esac
           else
             git clone -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" ws
           fi
@@ -77,13 +75,10 @@ jobs:
           M: ${{ github.event.inputs.mirror }}
         run: |
           ARCH=$(uname -m); [ "$ARCH" = "aarch64" ] && TAG=arm64 || TAG=x86
-          if [ "$GITHUB_SERVER_URL" = "https://github.com" ]; then
-            IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ps5-dump-forge"
-            [ -z "$M" ] && M=off     # GitHub runner 默认官方源
-          else
-            IMG="git.app.REDACTED.DOMAIN/rgan/ps5-dump-forge"
-            [ -z "$M" ] && M=on      # Forgejo 内网 runner 默认国内镜像
-          fi
+          case "$GITHUB_SERVER_URL" in
+            *github.com*) IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ps5-dump-forge"; [ -z "$M" ] && M=off ;;
+            *) IMG="${{ vars.INTERNAL_REGISTRY_IMAGE }}"; [ -z "$M" ] && M=on ;;
+          esac
           echo "img=$IMG" >> $GITHUB_OUTPUT; echo "tag=$TAG" >> $GITHUB_OUTPUT; echo "mirror=$M" >> $GITHUB_OUTPUT
           echo "image: $IMG:$TAG (mirror=$M)"
       - name: fetch upstream source
@@ -95,7 +90,7 @@ jobs:
       - name: docker build (native + cross)
         run: |
           cd ws
-          if [ "${{ steps.vars.outputs.mirror }}" = "on" ]; then BP="reg.svc.REDACTED.DOMAIN/docker.io/library/"; else BP="docker.io/library/"; fi
+          if [ "${{ steps.vars.outputs.mirror }}" = "on" ]; then BP="${{ vars.BASE_MIRROR_PREFIX }}"; else BP="docker.io/library/"; fi
           # 本机原生 + 交叉另一架构 (--target 剪枝, 每次恰好两轮编译)
           ARCH=$(uname -m); [ "$ARCH" = "aarch64" ] && { NATIVE=arm64; CROSS=x86; } || { NATIVE=x86; CROSS=arm64; }
           echo "native=$NATIVE cross=$CROSS (mirror=${{ steps.vars.outputs.mirror }})"
@@ -115,11 +110,10 @@ jobs:
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-          if [ "$GITHUB_SERVER_URL" = "https://git.app.REDACTED.DOMAIN" ]; then
-            echo "$TOK" | docker login git.app.REDACTED.DOMAIN -u rgan --password-stdin
-          else
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_REPOSITORY_OWNER" --password-stdin
-          fi
+          case "$GITHUB_SERVER_URL" in
+            *github.com*) echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_REPOSITORY_OWNER" --password-stdin ;;
+            *) echo "$TOK" | docker login "${IMG%%/*}" -u "${{ vars.INTERNAL_REGISTRY_USER }}" --password-stdin ;;
+          esac
           for TAG in $NATIVE $CROSS; do
             docker push ${{ steps.vars.outputs.img }}:$TAG
             docker push ${{ steps.vars.outputs.img }}:latest-$TAG
@@ -130,10 +124,9 @@ jobs:
         run: |
           cd ws
           echo "${{ needs.check-upstream.outputs.sha }}" > .upstream-sha
-          git config user.name "ci-bot" && git config user.email "ci@REDACTED.DOMAIN"
+          git config user.name "ci-bot" && git config user.email "ci@users.noreply.github.com"
           git add .upstream-sha && git commit -qm "ci: upstream -> ${{ needs.check-upstream.outputs.sha }}" || true
-          if [ "$GITHUB_SERVER_URL" = "https://git.app.REDACTED.DOMAIN" ] && [ -n "$TOK" ]; then
-            git push -q "https://oauth2:${TOK}@git.app.REDACTED.DOMAIN/${GITHUB_REPOSITORY}.git" HEAD:main
-          else
-            git push -q HEAD:main
-          fi
+          case "$GITHUB_SERVER_URL" in
+            *github.com*) git push -q HEAD:main ;;
+            *) git push -q "https://oauth2:${TOK}${GITHUB_SERVER_URL#https}:${GITHUB_REPOSITORY}.git" HEAD:main ;;
+          esac

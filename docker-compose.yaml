@@ -4,12 +4,14 @@
 #   1) user: "<UID>:<GID>"  ← SSH 上 NAS 用 `ls -ln <你的游戏目录>` 查属主数字 uid:gid 填入
 #      (镜像不钉用户; 漏填或填错 = Permission denied os error 13)
 #   2) volumes 的游戏目录路径 (建议无空格路径)
+#   3) image: 默认指向 ghcr 发布镜像; 私有 registry 用户改成自己的地址
 #
 # ⚠️ serve 无鉴权: 仅内网端口映射, 禁止挂公网域名/反代
 # Container Manager 坑: 改过本文件必须删项目重新导入, "更新"按钮不重读文件
 services:
   ps5-dump-forge:
-    image: git.app.REDACTED.DOMAIN/rgan/ps5-dump-forge:arm64
+    # ↓ 按需替换: 私有 registry 用户改成 <your-registry>/ps5-dump-forge:arm64
+    image: ghcr.io/OWNER/ps5-dump-forge:arm64
     container_name: ps5-dump-forge
     restart: unless-stopped
     # ↓↓↓ 必改: 换成你 NAS 游戏目录属主的 uid:gid ↓↓↓
@@ -20,5 +22,3 @@ services:
       - /volume1/ps5games:/games:rw
     # 多目录就多挂多行, 并追加 --root
     command: ["--root", "/games"]
-    dns:
-      - 192.0.2.1

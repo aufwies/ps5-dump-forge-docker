@@ -4,14 +4,16 @@
 
 ## 为什么有这个项目
 
-官方 release 的 Linux CLI **没有内嵌 Web 前端**（直接跑 `serve` 会提示 `web UI not built`）。本项目从源码多阶段构建：`npm run build:http` 生成前端 → 嵌入 Rust 二进制 → 装进运行时镜像，得到一个开箱即用的 WebUI 服务。
+官方 release 的 Linux CLI **没有内嵌 Web 前端**（直接跑 `serve` 会提示 `web UI not built`）。本项目从源码多阶段构建：`npm run build:http` 生成前端 → 嵌入 Rust 二进制 → 装进运行时镜像，得到一个开箱即用的 WebUI 服务。支持双架构（arm64 原生 + x86 Rust 交叉编译，单 runner 双产出）。
 
 ## 镜像
 
 ```
-git.app.REDACTED.DOMAIN/rgan/ps5-dump-forge:arm64    # Synology arm64 NAS 用这个
-git.app.REDACTED.DOMAIN/rgan/ps5-dump-forge:latest   # 同 digest 别名
+ghcr.io/<OWNER>/ps5-dump-forge:arm64    # Synology arm64 NAS
+ghcr.io/<OWNER>/ps5-dump-forge:x86      # x86_64 设备
 ```
+
+（私有 registry 用户把地址换成自己的即可。）
 
 镜像**不钉死任何运行用户**（无 USER 指令）——身份由 compose 的 `user:` 注入。
 
@@ -24,7 +26,7 @@ git.app.REDACTED.DOMAIN/rgan/ps5-dump-forge:latest   # 同 digest 别名
    - 按需改 `volumes` 里的游戏目录路径（**避免带空格的路径**）
 4. Container Manager → 项目 → 新建 → 选该目录 → 起项目
    - 改过 compose 后要**删项目重新导入**（"更新"按钮不重读文件，群晖老坑）
-5. 镜像拉取认证：Container Manager → 镜像 → 添加 `git.app.REDACTED.DOMAIN` 的账户
+5. 镜像拉取认证（私有 registry 时）：Container Manager → 镜像 → 添加 registry 的账户
 6. 浏览器开 `http://<NAS-IP>:8095`
 
 ## ⚠️ 安全边界（务必遵守）
@@ -32,7 +34,7 @@ git.app.REDACTED.DOMAIN/rgan/ps5-dump-forge:latest   # 同 digest 别名
 `serve` 模式**无任何鉴权**（官方设计如此）：不做 pairing、不校验 Host/Origin——**任何能访问 NAS 8095 端口的人都能读写挂载目录**。因此：
 
 - 只做内网端口映射（如本 compose）
-- **不要**挂公网域名 / 反代到 ESA / 暴露到 VPN 外
+- **不要**挂公网域名 / 反代公网 / 暴露到不受信网络
 - 不需要时停掉项目
 
 ## 多目录
@@ -46,20 +48,18 @@ git.app.REDACTED.DOMAIN/rgan/ps5-dump-forge:latest   # 同 digest 别名
     command: ["--root", "/games", "--root", "/dlc"]
 ```
 
-## 升级 ps5-dump-forge 版本
+## CI/CD（GitHub Actions 与 Forgejo Actions 双平台）
 
-CI 每日 05:30 自动检查上游 main 的新提交，有更新就重新构建并推送镜像（构建后把上游 sha 记录回 `.upstream-sha`）。也可在 Actions 页手动触发，参数：
+每日定时检查上游 main 的新提交，有更新就重新构建并推送双架构镜像（构建后把上游 sha 记录回 `.upstream-sha`）。也可手动触发，参数：
 
-- `mirror`：`on`=国内镜像源（默认，Forgejo 内网 runner 用）；`off`=官方源（GitHub runner 用）
+- `mirror`：`on`=国内镜像源（默认，Forgejo 内网 runner 用，通道矩阵见 AGENT.md）；`off`=官方源（GitHub runner 默认自动 off）
 - `force`：`true` 跳过 sha 检查强制构建
 
-镜像 tag 规则：`arm64` / `x86`（按构建机架构自动定）+ `latest-<arch>` 别名。
+镜像 tag 规则：`arm64` / `x86`（本机原生 + Rust 交叉编译另一架构）+ `latest-<arch>` 别名。
 
-### Secrets 配置
+Secrets / Variables：
 
-| 平台 | Secret | 值 | 用途 |
-|---|---|---|---|
-| Forgejo (git.app.REDACTED.DOMAIN) | `REGISTRY_PASSWORD` | git.app 的 API token（已配好） | clone 本仓 + 推镜像 |
-| GitHub | 无需手配 | 内置 `GITHUB_TOKEN` | 推 ghcr.io（首次推完在 package 设 public/private） |
-
-GitHub 侧 runner 是 x86，会自动产出 `x86` tag 并走官方源（`mirror=off`）。
+| 平台 | 配置项 | 说明 |
+|---|---|---|
+| GitHub | 无需手配 | 内置 `GITHUB_TOKEN` 推 ghcr.io |
+| Forgejo | secret `REGISTRY_PASSWORD`（clone+推镜像）；variable `INTERNAL_REGISTRY_IMAGE`（私有 registry 镜像全名） | 内网双架构发布 |
