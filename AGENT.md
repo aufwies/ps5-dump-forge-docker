@@ -43,6 +43,25 @@
 - workflow 表达式尽量收进 shell 判断（复杂 `${{ }}` 插值失败 = job 直接 fail）。
 - 内网 registry 镜像名用 repo variable `INTERNAL_REGISTRY_IMAGE` 注入（公开文件不写死私有地址）。
 
+## CI 配置矩阵（jellyfin-cix 式环境自描述）
+
+workflow 顶层 env 全部 vars 注入（配了就用，软互斥是约定非校验）：
+
+| Variable | Forgejo (git.app) | GitHub |
+|---|---|---|
+| `USE_MIRROR` | `true`（Dockerfile 国内源人格） | 不配（false 兜底，官方源） |
+| `HTTPS_PROXY` | `http://<内网代理>`（github 访问） | 不配（直连） |
+| `REGISTRY_IMAGE` | `<内网registry>/rgan/ps5-dump-forge` | 不配（ghcr.io/<owner> 兜底） |
+| `BASE_MIRROR_PREFIX` | `<mirror>/docker.io/library/` | 不配（docker.io 兜底） |
+| `REGISTRY_USER` | 内网 registry 用户 | 不配 |
+
+- variables API：**POST 创建 / PUT 更新已存在**（对不存在的变量 PUT=404）；GET 列表随时可读。
+- secrets：`REGISTRY_PASSWORD`（内网 clone+推镜像 token）。
+- 内网 job 容器网络 api.github 直连不通——HTTPS_PROXY 必配，否则 check 自动跳过当轮。
+- 顶层 env 的 HTTPS_PROXY 会作用于步骤内 git/curl/docker CLI：git 内网 clone 用 `-c http.proxy=` 覆盖、本地 curl 冒烟用 `--noproxy "*"`。
+- **docker 容器名最短 2 字符**（`--name t` 报 Invalid container name）——smoke 容器名用多字符。
+- dispatch inputs 只留 `force`；mirror 不是人工开关（环境自描述）。
+
 ## 本仓维护
 
 - compose 是 NAS 部署模板：**不含任何凭据与私有地址**。

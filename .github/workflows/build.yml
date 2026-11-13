@@ -120,11 +120,11 @@ jobs:
           echo "NATIVE=$NATIVE" >> $GITHUB_ENV; echo "CROSS=$CROSS" >> $GITHUB_ENV
       - name: smoke test (WebUI embedded, native arch only)
         run: |
-          docker run -d --name t -p 18095:8095 ${{ steps.vars.outputs.img }}:$NATIVE --root /tmp
+          docker run -d --name smoke-test -p 18095:8095 ${{ steps.vars.outputs.img }}:$NATIVE --root /tmp
           sleep 6
-          curl -sf --noproxy "*" http://127.0.0.1:18095/ | grep -q "<!doctype html" || { docker logs t; docker rm -f t; exit 1; }
+          curl -sf --noproxy "*" http://127.0.0.1:18095/ | grep -q "<!doctype html" || { docker logs t; docker rm -f smoke-test; exit 1; }
           curl -sf --noproxy "*" http://127.0.0.1:18095/api/jobs | grep -q instance
-          docker rm -f t && echo "SMOKE OK (native $NATIVE); cross $CROSS = 编译成功即收货"
+          docker rm -f smoke-test && echo "SMOKE OK (native $NATIVE); cross $CROSS = 编译成功即收货"
       - name: push
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
