@@ -120,11 +120,12 @@ jobs:
           echo "NATIVE=$NATIVE" >> $GITHUB_ENV; echo "CROSS=$CROSS" >> $GITHUB_ENV
       - name: smoke test (WebUI embedded, native arch only)
         run: |
-          CID=$(docker run -d ${{ steps.vars.outputs.img }}:$NATIVE --root /tmp)
-          IP=$(docker inspect -f '{{.NetworkSettings.IPAddress}}' "$CID")
+          # host 网络: smoke 容器直接监听 dind 的 8095 (job 容器经默认网关可达, 零端口映射零跨网问题)
+          CID=$(docker run -d --network host ${{ steps.vars.outputs.img }}:$NATIVE --root /tmp)
+          GW=$(ip route | awk '/default/ {print $3}')
           sleep 6
-          curl -sf --noproxy "*" "http://$IP:8095/" | grep -q "<!doctype html" || { docker logs "$CID"; docker rm -f "$CID"; exit 1; }
-          curl -sf --noproxy "*" "http://$IP:8095/api/jobs" | grep -q instance
+          curl -sf --noproxy "*" "http://$GW:8095/" | grep -q "<!doctype html" || { docker logs "$CID"; docker rm -f "$CID"; exit 1; }
+          curl -sf --noproxy "*" "http://$GW:8095/api/jobs" | grep -q instance
           docker rm -f "$CID" && echo "SMOKE OK (native $NATIVE); cross $CROSS = 编译成功即收货"
       - name: push
         env:
