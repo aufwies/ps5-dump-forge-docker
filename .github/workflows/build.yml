@@ -37,12 +37,14 @@ jobs:
       - name: clone (forgejo w/ token; github native)
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
+          SU: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
         run: |
-          echo "SU=[$GITHUB_SERVER_URL] REPO=[$GITHUB_REPOSITORY]"
+          echo "SU=[$SU] REPO=[$REPO]"
           if [ -n "$TOK" ]; then
-            git clone -q "https://oauth2:${TOK}@${GITHUB_SERVER_URL#https://}/$GITHUB_REPOSITORY.git" ws
+            git clone -q "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" ws
           else
-            git clone -q "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" ws
+            git clone -q "${SU}/${REPO}.git" ws
           fi
           echo CLONE_OK
           else
@@ -73,12 +75,14 @@ jobs:
       - name: clone
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
+          SU: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
         run: |
-          echo "SU=[$GITHUB_SERVER_URL] REPO=[$GITHUB_REPOSITORY]"
+          echo "SU=[$SU] REPO=[$REPO]"
           if [ -n "$TOK" ]; then
-            git clone -q "https://oauth2:${TOK}@${GITHUB_SERVER_URL#https://}/$GITHUB_REPOSITORY.git" ws
+            git clone -q "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" ws
           else
-            git clone -q "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" ws
+            git clone -q "${SU}/${REPO}.git" ws
           fi
           echo CLONE_OK
           else
