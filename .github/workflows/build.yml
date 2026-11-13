@@ -45,7 +45,9 @@ jobs:
         env:
           FORCE: ${{ github.event.inputs.force || 'false' }}
         run: |
-          SHA=$(git ls-remote https://github.com/${UPSTREAM}.git HEAD | cut -f1)
+          # api.github.com 通道 (容器内稳定); github.com 主域的 git 协议在 runner 容器内会被掐
+          SHA=$(curl -sf https://api.github.com/repos/${UPSTREAM}/commits/main | grep -m1 '"sha"' | cut -d'"' -f4)
+          [ -n "$SHA" ] || { echo "upstream sha fetch failed"; exit 1; }
           OLD=$(cat ws/.upstream-sha 2>/dev/null || echo none)
           echo "upstream: $SHA (last built: $OLD, force: $FORCE)"
           if [ "$SHA" = "$OLD" ] && [ "$FORCE" != "true" ]; then
