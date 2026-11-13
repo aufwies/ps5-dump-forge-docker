@@ -77,7 +77,6 @@ jobs:
         id: vars
         env:
           M: ${{ github.event.inputs.mirror }}
-        env:
           SU: ${{ github.server_url }}
           OWNER: ${{ github.repository_owner }}
         run: |
@@ -116,9 +115,11 @@ jobs:
       - name: push
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
+          SU: ${{ github.server_url }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           case "$SU" in
-            *github.com*) echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_REPOSITORY_OWNER" --password-stdin ;;
+            *github.com*) echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$OWNER" --password-stdin ;;
             *) echo "$TOK" | docker login "${IMG%%/*}" -u "${{ secrets.INTERNAL_REGISTRY_USER }}" --password-stdin ;;
           esac
           for TAG in $NATIVE $CROSS; do
@@ -128,7 +129,6 @@ jobs:
       - name: record upstream sha (push back)
         env:
           TOK: ${{ secrets.REGISTRY_PASSWORD }}
-        env:
           SU: ${{ github.server_url }}
           REPO: ${{ github.repository }}
         run: |
