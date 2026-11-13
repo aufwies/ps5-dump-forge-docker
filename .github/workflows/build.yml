@@ -143,8 +143,7 @@ jobs:
           echo "${{ needs.check-upstream.outputs.sha }}" > .upstream-sha
           git config user.name "ci-bot" && git config user.email "ci@users.noreply.github.com"
           git add .upstream-sha && git commit -qm "ci: upstream -> ${{ needs.check-upstream.outputs.sha }}" || true
-          if [ -n "$TOK" ]; then
-            git push -q -c http.proxy= "https://oauth2:${TOK}@${SU#https://}/${REPO}.git" HEAD:main
-          else
-            git push -q HEAD:main
-          fi
+          PUSHURL="${SU}/${REPO}.git"
+          [ -n "$TOK" ] && PUSHURL="https://oauth2:${TOK}@${SU#https://}/${REPO}.git"
+          # 回推失败不阻塞 (与人手 push 竞争时 non-fast-forward 属正常, 下轮自愈)
+          git push -q -c http.proxy= "$PUSHURL" HEAD:main 2>&1 | head -2 || echo "::notice:: sha 回推跳过 (下轮自愈)"
